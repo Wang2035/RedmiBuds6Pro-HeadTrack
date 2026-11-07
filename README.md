@@ -246,7 +246,7 @@ raw → 5 点中值 → 差分（相对校准中心）→ 乘增益 → One Euro
 
 实测 420 帧真实数据：静止帧逐帧 Δ p90 从 0.088° 降到 0.035°，p99 从 0.505° 降到 0.051°；120° 阶跃 0→90% 用 286 ms，无超调。
 
-### 三点校准
+### 五点校准
 
 采五个点：`C` 正前、`Q` 左、`E` 右、`W` 抬头、`S` 低头。每点采 12 帧取中位。
 
@@ -679,7 +679,7 @@ Filter chain parameters:
 
 Measured on 420 frames of real data: the per-frame Δ of still frames went from p90 0.088° down to 0.035°, and p99 from 0.505° down to 0.051°; a 120° step takes 286 ms for 0→90%, with no overshoot.
 
-### Three-point calibration
+### Five-point calibration
 
 Capture five points: `C` front, `Q` left, `E` right, `W` look up, `S` look down. Each point captures 12 frames and takes the median.
 
