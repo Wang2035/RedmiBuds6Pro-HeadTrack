@@ -1,0 +1,15 @@
+# runtime
+reader.log
+*.log
+
+# node
+node_modules/
+package-lock.json
+
+# build output (keep the exe if you ship binaries)
+# *.exe
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store

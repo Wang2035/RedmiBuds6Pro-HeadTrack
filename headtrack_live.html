@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>REDMI Buds 6 Pro — 头部追踪</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#07090d;color:#c8d4e0;
+    font:13px/1.5 Consolas,"Courier New",monospace;user-select:none}
+  #c{display:block;width:100%;height:100%}
+  #h{position:fixed;left:14px;top:12px;pointer-events:none;line-height:1.55;text-shadow:0 0 6px #000}
+  #h b{color:#4ee1a0;font-weight:600}
+  #h .v{color:#fff}
+  .d{color:#5d6d7e}
+  #cal{position:fixed;left:14px;bottom:14px;width:300px;background:rgba(11,16,22,.9);
+    border:1px solid #1e2b38;border-radius:6px;padding:9px 11px 10px}
+  #cal .t{color:#3ba9e0;font-size:12px;margin-bottom:6px}
+  .p{display:flex;align-items:center;gap:6px;height:23px}
+  .p .k{width:16px;height:16px;line-height:16px;text-align:center;background:#1b2836;
+    border-radius:3px;color:#8fa8bf;font-size:11px;flex:none}
+  .p .n{width:52px}
+  .p .g{flex:1;color:#5d6d7e;font-size:11px}
+  .p.on .g,.p.on .s{color:#4ee1a0}
+  .p .s{width:44px;text-align:right;font-size:11px;color:#5d6d7e}
+  input[type=number]{width:44px;background:#0d141b;border:1px solid #1e2b38;color:#c8d4e0;
+    border-radius:3px;padding:1px 3px;font:inherit;font-size:11px;text-align:right}
+  .r{display:flex;align-items:center;gap:9px;margin-top:8px}
+  .r label{color:#5d6d7e;font-size:11px;display:flex;align-items:center;gap:4px}
+  input[type=range]{width:54px;accent-color:#3ba9e0}
+  button{background:#16222e;border:1px solid #24384a;color:#9fb6c9;border-radius:3px;
+    padding:2px 8px;font:inherit;font-size:11px;cursor:pointer}
+  button:hover{background:#1d2f3e;color:#d6e6f2}
+  .fl{animation:fl .45s ease-out}
+  @keyframes fl{from{background:rgba(78,225,160,.35)}to{background:transparent}}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="h">
+  <div><b>REDMI Buds 6 Pro</b> <span class="d">— HID 14B · 3×int16</span></div>
+  <div>yaw <span class="v" id="vY">0.0</span>° pitch <span class="v" id="vP">0.0</span>° roll <span class="v" id="vR">0.0</span>°</div>
+  <div class="d"><span id="vM">连接中…</span> · <span id="vF">0</span> fps · <span id="vH">0</span> Hz · σ<span id="vJ">0.00</span>°</div>
+  <div class="d">拖动旋转 · 滚轮缩放 · 双击复位</div>
+</div>
+
+<div id="cal">
+  <div class="t">校准 — 保持不动按一下对应键</div>
+  <div class="p" id="p-C"><span class="k">C</span><span class="n">正前方</span><span class="g" id="g-C">未记录</span><span class="s" id="s-C">—</span></div>
+  <div class="p" id="p-Q"><span class="k">Q</span><span class="n">向左转</span><input type="number" id="t-Q" value="-30"><span class="g" id="g-Q"></span><span class="s" id="s-Q">—</span></div>
+  <div class="p" id="p-E"><span class="k">E</span><span class="n">向右转</span><input type="number" id="t-E" value="30"><span class="g" id="g-E"></span><span class="s" id="s-E">—</span></div>
+  <div class="p" id="p-W"><span class="k">W</span><span class="n">抬 头</span><input type="number" id="t-W" value="25"><span class="g" id="g-W"></span><span class="s" id="s-W">—</span></div>
+  <div class="p" id="p-S"><span class="k">S</span><span class="n">低 头</span><input type="number" id="t-S" value="-25"><span class="g" id="g-S"></span><span class="s" id="s-S">—</span></div>
+  <div class="r">
+    <label>平滑<input type="range" id="sm" min="0" max="100" value="62"></label>
+    <label>跟随<input type="range" id="fw" min="0" max="100" value="35"></label>
+    <label>灵敏<input type="range" id="gn" min="20" max="300" value="100"></label>
+  </div>
+  <div class="r"><button id="clr">清除校准</button><button id="rz">倾斜 关</button><button id="irz">倾斜反相</button></div>
+  <div class="d" style="font-size:11px;line-height:1.7;margin-top:6px">
+    <b>C</b> 正前 · <b>Q</b> 左 · <b>E</b> 右 · <b>W</b> 抬头 · <b>S</b> 低头<br>
+    <b>Z</b> 倾斜开关 · <b>Shift+Z</b> 倾斜反相<br>
+    <b>X</b> 左右反相 · <b>Y</b> 上下反相 · <b>1/2/3</b> 指定 yaw 轴
+  </div>
+  <div class="r"><button id="ka">保活 开</button><span class="d" id="kaS" style="font-size:11px;flex:1">—</span></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var RAW_K = 180 / 32768;
+  var KEY = 'ht.cal.v5';
+  var OLD = 'ht.cal.v4';
+
+  /* ============================================================
+     立方体渲染 — canvas 2D 手写透视，无外部依赖
+     顶点索引: 0(-1,-1,1) 1(1,-1,1) 2(1,1,1) 3(-1,1,1)
+              4(-1,-1,-1) 5(1,-1,-1) 6(1,1,-1) 7(-1,1,-1)
+     ============================================================ */
+  var cv = $('c'), g2 = cv.getContext('2d', { alpha: false });
+
+  var V = [
+    [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1],
+    [-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1]
+  ];
+  // 每个面: 四顶点索引 + 外法线 + 是否正面
+  var F = [
+    [[0, 1, 2, 3], [0, 0, 1], 1],
+    [[5, 4, 7, 6], [0, 0, -1], 0],
+    [[1, 5, 6, 2], [1, 0, 0], 0],
+    [[4, 0, 3, 7], [-1, 0, 0], 0],
+    [[3, 2, 6, 7], [0, 1, 0], 0],
+    [[4, 5, 1, 0], [0, -1, 0], 0]
+  ];
+  var E = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+
+  /* 相机：可调，基向量只在视角变化时重算，正常渲染零三角函数 */
+  var camD = 6.2, camY = 0.62, camP = 0.30, FOV = 50 * Math.PI / 180;
+  var DEF = { d: 6.2, y: 0.62, p: 0.30 };
+  var B = null;
+
+  function mkBasis() {
+    var cp = Math.cos(camP), sp = Math.sin(camP);
+    var ex = camD * cp * Math.sin(camY), ey = camD * sp, ez = camD * cp * Math.cos(camY);
+    var fx = -ex / camD, fy = -ey / camD, fz = -ez / camD;
+    var rx = -fz, ry = 0, rz = fx;
+    var rl = Math.sqrt(rx * rx + rz * rz);
+    if (!(rl > 1e-4)) rl = 1e-4;
+    rx /= rl; rz /= rl;
+    var ux = ry * fz - rz * fy, uy = rz * fx - rx * fz, uz = rx * fy - ry * fx;
+    B = { ex: ex, ey: ey, ez: ez, fx: fx, fy: fy, fz: fz,
+          rx: rx, ry: ry, rz: rz, ux: ux, uy: uy, uz: uz };
+  }
+  mkBasis();
+
+  var W = 0, H = 0, CX = 0, CY = 0, FOC = 500, DPR = 1;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.clientWidth; H = cv.clientHeight;
+    cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+    CX = (W * DPR) / 2; CY = (H * DPR) / 2;
+    FOC = (H * DPR / 2) / Math.tan(FOV / 2);
+    g2.setTransform(DPR, 0, 0, DPR, 0, 0);
+    CX = W / 2; CY = H / 2;
+    g2.fillStyle = '#07090d'; g2.fillRect(0, 0, W, H);
+  }
+
+  /* YXZ 欧拉旋转 */
+  function rot(p, y, x, z, o) {
+    var cy = Math.cos(y), sy = Math.sin(y);
+    var cx = Math.cos(x), sx = Math.sin(x);
+    var cz = Math.cos(z), sz = Math.sin(z);
+    var x1 = p[0] * cz - p[1] * sz, y1 = p[0] * sz + p[1] * cz, z1 = p[2];
+    var y2 = y1 * cx - z1 * sx, z2 = y1 * sx + z1 * cx;
+    o[0] = x1 * cy + z2 * sy;
+    o[1] = y2;
+    o[2] = -x1 * sy + z2 * cy;
+  }
+
+  var P8 = [], tmp = [0, 0, 0], D8 = new Float32Array(8);
+
+  function project(y, x, z) {
+    for (var i = 0; i < 8; i++) {
+      rot(V[i], y, x, z, tmp);
+      var vx = tmp[0] - B.ex, vy = tmp[1] - B.ey, vz = tmp[2] - B.ez;
+      var zc = vx * B.fx + vy * B.fy + vz * B.fz;
+      D8[i] = zc;
+      if (zc < 0.05) zc = 0.05;
+      var xc = vx * B.rx + vy * B.ry + vz * B.rz;
+      var yc = vx * B.ux + vy * B.uy + vz * B.uz;
+      var p = P8[i] || (P8[i] = [0, 0]);
+      p[0] = CX + xc * FOC / zc;
+      p[1] = CY - yc * FOC / zc;
+    }
+  }
+
+  var LX = 0.40, LY = 0.78, LZ = 0.48;
+  var order = [0, 1, 2, 3, 4, 5], fd = new Float32Array(6);
+
+  function draw(y, x, z) {
+    g2.fillStyle = '#07090d';
+    g2.fillRect(0, 0, W, H);
+    project(mapY(y), mapX(x), mapZ(z));
+
+    /* 面：按深度排序后画（画家算法） */
+    for (var i = 0; i < 6; i++) {
+      var f = F[i], q = f[0];
+      fd[i] = (D8[q[0]] + D8[q[1]] + D8[q[2]] + D8[q[3]]) * 0.25;
+    }
+    order.sort(function (a, b) { return fd[b] - fd[a]; });
+
+    for (var k = 0; k < 6; k++) {
+      var fi = order[k], fc = F[fi], vq = fc[0], n = fc[1];
+      rot(n, mapY(y), mapX(x), mapZ(z), tmp);
+      var lam = tmp[0] * LX + tmp[1] * LY + tmp[2] * LZ;
+      if (lam < 0) lam = 0;
+      var sh = 0.22 + 0.78 * lam;
+      if (fc[2]) {
+        g2.fillStyle = 'rgba(' + (43 * sh | 0) + ',' + (58 * sh | 0) + ',' + (74 * sh | 0) + ',1)';
+      } else {
+        g2.fillStyle = 'rgba(' + (26 * sh | 0) + ',' + (36 * sh | 0) + ',' + (47 * sh | 0) + ',1)';
+      }
+      g2.beginPath();
+      g2.moveTo(P8[vq[0]][0], P8[vq[0]][1]);
+      g2.lineTo(P8[vq[1]][0], P8[vq[1]][1]);
+      g2.lineTo(P8[vq[2]][0], P8[vq[2]][1]);
+      g2.lineTo(P8[vq[3]][0], P8[vq[3]][1]);
+      g2.closePath();
+      g2.fill();
+    }
+
+    /* 棱：按平均深度调亮度 */
+    g2.lineWidth = 1.6;
+    for (var e = 0; e < 12; e++) {
+      var a = E[e][0], b = E[e][1];
+      var dep = (D8[a] + D8[b]) * 0.5;
+      var t = 1 - Math.min(1, Math.max(0, (dep - (camD - 2.4)) / 4.6));
+      g2.strokeStyle = 'rgba(' + (78 + 40 * t | 0) + ',' + (190 + 60 * t | 0) + ',' + (150 + 70 * t | 0) + ',' + (0.35 + 0.65 * t).toFixed(2) + ')';
+      g2.beginPath();
+      g2.moveTo(P8[a][0], P8[a][1]);
+      g2.lineTo(P8[b][0], P8[b][1]);
+      g2.stroke();
+    }
+
+    /* 正前标记：前脸中心一个小绿点 */
+    rot([0, 0, 1.0], mapY(y), mapX(x), mapZ(z), tmp);
+    var vx = tmp[0] - B.ex, vy = tmp[1] - B.ey, vz = tmp[2] - B.ez;
+    var zc2 = vx * B.fx + vy * B.fy + vz * B.fz;
+    if (zc2 > 0.05) {
+      var sx = CX + (vx * B.rx + vy * B.ry + vz * B.rz) * FOC / zc2;
+      var sy = CY - (vx * B.ux + vy * B.uy + vz * B.uz) * FOC / zc2;
+      g2.fillStyle = '#4ee1a0';
+      g2.beginPath();
+      g2.arc(sx, sy, 3.4, 0, 6.2832);
+      g2.fill();
+    }
+  }
+
+  /* 与旧渲染器同一套旋转约定，保证方向表现一致 */
+  var DR = Math.PI / 180;
+  function mapY(v) { return v * DR; }
+  function mapX(v) { return v * DR; }
+  function mapZ(v) { return v * DR; }
+
+  /* ============================================================
+     校准
+     ============================================================ */
+  var cal = {
+    center: null, points: { C: null, Q: null, E: null, W: null, S: null },
+    target: { Q: -30, E: 30, W: 25, S: -25 },
+    yawAxis: 2, pitchAxis: 0, rollAxis: 1,
+    invertYaw: true, invertPitch: false,
+    rollOn: false, invertRoll: true,
+    slopeYaw: null, slopePitch: null, kRollYaw: null
+  };
+
+  var smoothPct = 62, followPct = 35, gainPct = 100;
+
+  function loadCal() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (!raw) raw = localStorage.getItem(OLD);   /* 迁移 v4，rollOn 一律不继承 */
+      if (!raw) return;
+      var o = JSON.parse(raw);
+      if (o.points) for (var k in o.points) if (o.points[k]) cal.points[k] = o.points[k];
+      if (o.target) for (var k2 in o.target) if (typeof o.target[k2] === 'number') cal.target[k2] = o.target[k2];
+      if (o.center) cal.center = o.center;
+      if (typeof o.invertYaw === 'boolean') cal.invertYaw = o.invertYaw;
+      if (typeof o.invertPitch === 'boolean') cal.invertPitch = o.invertPitch;
+      /* rollOn 不恢复：倾斜必须每次手动开，否则第三根轴的串扰会把 yaw 变成倾斜 */
+      if (typeof o.invertRoll === 'boolean') cal.invertRoll = o.invertRoll;
+      if (typeof o.yawAxis === 'number') cal.yawAxis = o.yawAxis;
+      if (typeof o.pitchAxis === 'number') cal.pitchAxis = o.pitchAxis;
+      if (typeof o.rollAxis === 'number') cal.rollAxis = o.rollAxis;
+      if (typeof o.slopeYaw === 'number') cal.slopeYaw = o.slopeYaw;
+      if (typeof o.slopePitch === 'number') cal.slopePitch = o.slopePitch;
+      if (typeof o.smoothPct === 'number') { smoothPct = o.smoothPct; $('sm').value = smoothPct; }
+      if (typeof o.followPct === 'number') { followPct = o.followPct; $('fw').value = followPct; }
+      if (typeof o.gainPct === 'number') { gainPct = o.gainPct; $('gn').value = gainPct; }
+      applyFilters();
+      rebuild();
+    } catch (e) { }
+  }
+
+  function saveCal() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify({
+        points: cal.points, target: cal.target, center: cal.center,
+        invertYaw: cal.invertYaw, invertPitch: cal.invertPitch,
+        rollOn: cal.rollOn, invertRoll: cal.invertRoll,
+        yawAxis: cal.yawAxis, pitchAxis: cal.pitchAxis, rollAxis: cal.rollAxis,
+        slopeYaw: cal.slopeYaw, slopePitch: cal.slopePitch, kRollYaw: cal.kRollYaw,
+        smoothPct: smoothPct, followPct: followPct, gainPct: gainPct
+      }));
+    } catch (e) { }
+  }
+
+  function med(a) { var b = a.slice().sort(function (x, y) { return x - y; }); return b[b.length >> 1]; }
+  function d3(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+  function a3(v) { return [Math.abs(v[0]), Math.abs(v[1]), Math.abs(v[2])]; }
+
+  function fit(pairs) {
+    var sxy = 0, sxx = 0, n = 0;
+    for (var i = 0; i < pairs.length; i++) {
+      var dx = pairs[i][0], dy = pairs[i][1];
+      if (!isFinite(dx) || !isFinite(dy) || dx === 0) continue;
+      sxy += dx * dy; sxx += dx * dx; n++;
+    }
+    if (!n || sxx < 1) return null;
+    return sxy / sxx;
+  }
+
+  function rebuild() {
+    var P = cal.points, i;
+    if (!cal.center) cal.center = P.C || null;
+
+    var left = [0, 1, 2];
+    if (P.C && P.Q && P.E) {
+      var dl = a3(d3(P.Q, P.C)), dr = a3(d3(P.E, P.C));
+      var sc = [dl[0] + dr[0], dl[1] + dr[1], dl[2] + dr[2]];
+      var best = 0;
+      for (i = 1; i < 3; i++) if (sc[i] > sc[best]) best = i;
+      cal.yawAxis = best;
+      left = left.filter(function (x) { return x !== best; });
+    } else {
+      left = [0, 1, 2].filter(function (x) { return x !== cal.yawAxis; });
+    }
+
+    if (P.C && P.W && P.S) {
+      var du = a3(d3(P.W, P.C)), dd = a3(d3(P.S, P.C));
+      var sc2 = [du[0] + dd[0], du[1] + dd[1], du[2] + dd[2]];
+      var bp = left[0], bv = -1;
+      for (i = 0; i < left.length; i++) {
+        var ax = left[i];
+        if (sc2[ax] > bv) { bv = sc2[ax]; bp = ax; }
+      }
+      cal.pitchAxis = bp;
+    }
+
+    cal.rollAxis = 3 - cal.yawAxis - cal.pitchAxis;
+    if (cal.rollAxis < 0 || cal.rollAxis > 2 || cal.rollAxis === cal.yawAxis || cal.rollAxis === cal.pitchAxis) {
+      cal.rollAxis = [0, 1, 2].filter(function (x) {
+        return x !== cal.yawAxis && x !== cal.pitchAxis;
+      })[0];
+    }
+    if (cal.rollAxis === undefined) cal.rollAxis = 1;
+
+    /* ★ 只取幅度；方向由 X/Y 开关决定，避免校准把符号带反 */
+    cal.slopeYaw = null; cal.slopePitch = null;
+    if (P.C && P.Q && P.E) {
+      var sv = fit([
+        [P.Q[cal.yawAxis] - P.C[cal.yawAxis], cal.target.Q],
+        [P.E[cal.yawAxis] - P.C[cal.yawAxis], cal.target.E]
+      ]);
+      if (sv != null) cal.slopeYaw = Math.abs(sv);
+    }
+    if (P.C && P.W && P.S) {
+      var sp = fit([
+        [P.W[cal.pitchAxis] - P.C[cal.pitchAxis], cal.target.W],
+        [P.S[cal.pitchAxis] - P.C[cal.pitchAxis], cal.target.S]
+      ]);
+      if (sp != null) cal.slopePitch = Math.abs(sp);
+    }
+
+    /* 解 roll 轴与 yaw 轴的串扰系数：左右转头时第三根轴跟着动多少 */
+    cal.kRollYaw = null;
+    if (P.C && P.Q && P.E) {
+      var cc = P.C;
+      var dyq = P.Q[cal.yawAxis] - cc[cal.yawAxis];
+      var dye = P.E[cal.yawAxis] - cc[cal.yawAxis];
+      var drq = P.Q[cal.rollAxis] - cc[cal.rollAxis];
+      var dre = P.E[cal.rollAxis] - cc[cal.rollAxis];
+      var den = dyq * dyq + dye * dye;
+      if (den > 1) cal.kRollYaw = (drq * dyq + dre * dye) / den;
+    }
+
+    cal.center = P.C || cal.center;
+    paintCal();
+    saveCal();
+  }
+
+  function paintCal() {
+    var P = cal.points, ks = ['C', 'Q', 'E', 'W', 'S'], i;
+    for (i = 0; i < ks.length; i++) {
+      var k = ks[i], row = $('p-' + k), st = $('s-' + k);
+      if (P[k]) { row.classList.add('on'); st.textContent = '已记录'; }
+      else { row.classList.remove('on'); st.textContent = '—'; }
+    }
+    $('g-C').textContent = P.C ? ('原始 ' + P.C.map(function (v) { return Math.round(v); }).join('/')) : '未记录';
+    var c = P.C;
+    $('g-Q').textContent = P.Q && c ? ('Δ ' + (P.Q[cal.yawAxis] - c[cal.yawAxis]).toFixed(0)) : '';
+    $('g-E').textContent = P.E && c ? ('Δ ' + (P.E[cal.yawAxis] - c[cal.yawAxis]).toFixed(0)) : '';
+    $('g-W').textContent = P.W && c ? ('Δ ' + (P.W[cal.pitchAxis] - c[cal.pitchAxis]).toFixed(0)) : '';
+    $('g-S').textContent = P.S && c ? ('Δ ' + (P.S[cal.pitchAxis] - c[cal.pitchAxis]).toFixed(0)) : '';
+  }
+
+  var rec = null, recBuf = [], REC_N = 12;
+
+  function startRec(k) {
+    if (mode !== 'live') return;
+    rec = k; recBuf = [];
+    var row = $('p-' + k);
+    row.classList.remove('fl'); void row.offsetWidth; row.classList.add('fl');
+  }
+
+  function feedRec(v) {
+    if (!rec) return;
+    recBuf.push(v);
+    $('s-' + rec).textContent = recBuf.length + '/' + REC_N;
+    if (recBuf.length < REC_N) return;
+    cal.points[rec] = [
+      med(recBuf.map(function (x) { return x[0]; })),
+      med(recBuf.map(function (x) { return x[1]; })),
+      med(recBuf.map(function (x) { return x[2]; }))
+    ];
+    rec = null; recBuf = [];
+    rebuild();
+  }
+
+  /* ============================================================
+     角度换算
+     ============================================================ */
+  function toAngles(r) {
+    var c = cal.center;
+    if (!c) return { y: 0, p: 0, r: 0 };
+    var my = cal.slopeYaw != null ? cal.slopeYaw : RAW_K;
+    var mp = cal.slopePitch != null ? cal.slopePitch : RAW_K;
+    var g = gainPct / 100;
+    var dYaw = r[cal.yawAxis] - c[cal.yawAxis];
+    var dPit = r[cal.pitchAxis] - c[cal.pitchAxis];
+    var dRol = r[cal.rollAxis] - c[cal.rollAxis];
+
+    var y = dYaw * my * g * (cal.invertYaw ? -1 : 1);
+    var p = dPit * mp * g * (cal.invertPitch ? -1 : 1);
+
+    /* roll 默认关闭。开启时先把 yaw 串扰减掉：第三根轴会跟着左右转头一起动，
+       不减的话扭头就变成歪头。系数由 Q/E 校准点解出。 */
+    var ro = 0;
+    if (cal.rollOn) {
+      var k = cal.kRollYaw || 0;
+      ro = (dRol - k * dYaw) * RAW_K * g * (cal.invertRoll ? -1 : 1);
+      if (ro > 35) ro = 35; else if (ro < -35) ro = -35;
+    }
+
+    if (Math.abs(y) < 0.04) y = 0;
+    if (Math.abs(p) < 0.04) p = 0;
+    if (Math.abs(ro) < 0.04) ro = 0;
+    return { y: y, p: p, r: ro };
+  }
+
+  /* ============================================================
+     滤波：中值5 → One Euro → 限速
+     ============================================================ */
+  function Med5() { this.a = []; }
+  Med5.prototype.push = function (v) {
+    var a = this.a;
+    a.push(v);
+    if (a.length > 5) a.shift();
+    if (a.length < 5) return v;
+    var b = a.slice().sort(function (x, y) { return x - y; });
+    return b[2];
+  };
+
+  function OE() { this.on = false; this.raw = 0; this.x = 0; this.dx = 0; this.last = 0; }
+  OE.prototype.a = function (cut, dt) {
+    var tau = 1 / (6.28318530718 * cut);
+    return 1 / (1 + tau / dt);
+  };
+  OE.prototype.step = function (x, dt, mc) {
+    if (!(dt > 0)) dt = 0.057;
+    if (dt > 0.25) dt = 0.25;
+    if (!this.on) { this.on = true; this.raw = x; this.x = x; this.dx = 0; this.last = x; return x; }
+    var d = (x - this.raw) / dt; this.raw = x;
+    var ad = this.a(0.7, dt);
+    this.dx = ad * d + (1 - ad) * this.dx;
+    var alpha = this.a(mc + this.beta * Math.abs(this.dx), dt);
+    this.x = alpha * x + (1 - alpha) * this.x;
+    return this.x;
+  };
+
+  var meds = [new Med5(), new Med5(), new Med5()];
+  var fy = new OE(), fp = new OE(), fr = new OE();
+  fy.beta = fp.beta = fr.beta = 0.036;
+
+  var SLEW = 500, STILL_MUL = 0.22, STILL_TOL = 0.6;
+  var hist = [];
+
+  function applyFilters() {
+    var mc = 6.0 * Math.pow(0.042, smoothPct / 100);
+    var b = 0.002 + (followPct / 100) * 0.098;
+    fy.mc = fp.mc = fr.mc = mc;
+    fy.beta = fp.beta = fr.beta = b;
+  }
+
+  function isStill(ax) {
+    if (hist.length < 6) return false;
+    var lo = hist[0][ax], hi = lo;
+    for (var i = 1; i < 6; i++) {
+      var v = hist[i][ax];
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    return (hi - lo) * RAW_K < STILL_TOL;
+  }
+
+  function stab(f, tgt, ax, dt) {
+    var out = f.step(tgt, dt, isStill(ax) ? f.mc * STILL_MUL : f.mc);
+    var mx = SLEW * dt;
+    var d = out - f.last;
+    if (d > mx) out = f.last + mx;
+    else if (d < -mx) out = f.last - mx;
+    f.last = out;
+    return out;
+  }
+
+  /* ============================================================
+     实时数据
+     ============================================================ */
+  var mode = 'boot';
+  var last = null, lastAt = 0, prevAt = 0, warm = [];
+  var rateT0 = 0, rateN = 0, rate = 0, jit = [], jitV = 0;
+  var segF = { y: 0, p: 0, r: 0 }, segT = { y: 0, p: 0, r: 0 }, seg0 = 0, segD = 0.057;
+
+  function onSample(s) {
+    var v = [s.a, s.b, s.c];
+    var now = performance.now();
+    last = v; lastAt = now;
+
+    if (!cal.center) {
+      warm.push(v);
+      if (warm.length > 24) warm.shift();
+      if (warm.length >= 8) {
+        var c = [
+          med0(warm.map(function (x) { return x[0]; })),
+          med0(warm.map(function (x) { return x[1]; })),
+          med0(warm.map(function (x) { return x[2]; }))
+        ];
+        cal.center = c;
+        paintCal();
+      }
+    }
+
+    feedRec(v);
+
+    var dtS = prevAt ? (now - prevAt) / 1000 : 0.057;
+    prevAt = now;
+    if (!(dtS > 0) || dtS > 0.3) dtS = 0.057;
+
+    var m = [meds[0].push(v[0]), meds[1].push(v[1]), meds[2].push(v[2])];
+    hist.push(m);
+    if (hist.length > 6) hist.shift();
+
+    var a = toAngles(m);
+    var ny = stab(fy, a.y, cal.yawAxis, dtS);
+    var np = stab(fp, a.p, cal.pitchAxis, dtS);
+    var nr = stab(fr, a.r, cal.rollAxis, dtS);
+
+    segF.y = cur.y; segF.p = cur.p; segF.r = cur.r;
+    segT.y = ny; segT.p = np; segT.r = nr;
+    seg0 = now;
+    segD = dtS > 0.18 ? 0.18 : (dtS < 0.02 ? 0.02 : dtS);
+
+    jit.push(ny);
+    if (jit.length > 40) jit.shift();
+    if (jit.length > 8) {
+      var s1 = 0, s2 = 0, n = jit.length, i;
+      for (i = 0; i < n; i++) { s1 += jit[i]; s2 += jit[i] * jit[i]; }
+      var mn = s1 / n;
+      jitV = Math.sqrt(Math.max(0, s2 / n - mn * mn));
+    }
+
+    if (!rateT0) rateT0 = now;
+    rateN++;
+    if (now - rateT0 > 1000) { rate = rateN * 1000 / (now - rateT0); rateT0 = now; rateN = 0; }
+  }
+
+  function med0(a) { return med(a); }
+
+  function connect() {
+    if (location.protocol !== 'http:' && location.protocol !== 'https:') {
+      var base = 'http://127.0.0.1:8899/';
+      $('vM').textContent = '连接服务…';
+      fetch(base + 'status', { cache: 'no-store' })
+        .then(function (r) { if (r.ok) location.replace(base); else throw 0; })
+        .catch(function () { $('vM').textContent = '请双击 start.bat'; });
+      return;
+    }
+    var es;
+    try { es = new EventSource('/sse'); } catch (e) { $('vM').textContent = 'SSE 不可用'; return; }
+    es.addEventListener('sample', function (ev) {
+      try {
+        var s = JSON.parse(ev.data);
+        mode = 'live';
+        setM('实时 HID');
+        onSample(s);
+      } catch (e2) { }
+    });
+    es.addEventListener('status', function (ev) {
+      try { if (JSON.parse(ev.data).ready) setM('实时 HID'); } catch (e2) { }
+    });
+    es.addEventListener('error', function (ev) {
+      var t = '';
+      try { t = JSON.parse(ev.data).message || ''; } catch (e2) { }
+      if (t) setM('读取器报错');
+    });
+    es.onerror = function () { if (mode !== 'live') setM('等待服务…'); };
+    setTimeout(function () { if (mode !== 'live') setM('没有数据'); }, 6000);
+  }
+
+  function setM(t) { if (vM_t !== t) { vM_t = t; $('vM').textContent = t; } }
+  var vM_t = '';
+
+  /* ============================================================
+     主循环
+     ============================================================ */
+  var cur = { y: 0, p: 0, r: 0 };
+  var prev = performance.now(), fpsT0 = 0, fpsN = 0, fps = 0;
+  var lastY = 1e9, lastP = 1e9, lastR = 1e9, lastJ = -1, lastF = -1, lastH = -1;
+
+  function tick(now) {
+    var dt = (now - prev) / 1000;
+    prev = now;
+
+    if (mode === 'live' && last) {
+      var u = seg0 ? (now - seg0) / (segD * 1000) : 1;
+      if (!(u > 0)) u = 0;
+      if (u > 1) u = 1;
+      cur.y = segF.y + (segT.y - segF.y) * u;
+      cur.p = segF.p + (segT.p - segF.p) * u;
+      cur.r = segF.r + (segT.r - segF.r) * u;
+
+      var stale = now - lastAt;
+      if (stale > 1500) setM('断流 ' + (stale / 1000 | 0) + 's');
+      else if (mode === 'live') setM('实时 HID');
+    }
+
+    draw(cur.y, cur.p, cur.r);
+
+    /* 只在数值变化时碰 DOM */
+    var ry = Math.round(cur.y * 10) / 10, rp = Math.round(cur.p * 10) / 10;
+    var rr = Math.round(cur.r * 10) / 10;
+    if (ry !== lastY) { lastY = ry; $('vY').textContent = ry.toFixed(1); }
+    if (rp !== lastP) { lastP = rp; $('vP').textContent = rp.toFixed(1); }
+    if (rr !== lastR) { lastR = rr; $('vR').textContent = rr.toFixed(1); }
+
+    fpsN++;
+    if (now - fpsT0 > 500) { fps = fpsN * 1000 / (now - fpsT0); fpsT0 = now; fpsN = 0; }
+
+    var fi = Math.round(fps);
+    if (fi !== lastF) { lastF = fi; $('vF').textContent = fi; }
+    var hi = Math.round(rate);
+    if (hi !== lastH) { lastH = hi; $('vH').textContent = hi; }
+    var ji = Math.round(jitV * 100) / 100;
+    if (ji !== lastJ) { lastJ = ji; $('vJ').textContent = ji.toFixed(2); }
+
+    requestAnimationFrame(tick);
+  }
+
+  /* ============================================================
+     交互
+     ============================================================ */
+  /* 视角：拖动旋转，滚轮缩放，双击复位 */
+  var drag = false, lx = 0, ly = 0;
+  cv.style.cursor = 'grab';
+
+  cv.addEventListener('pointerdown', function (e) {
+    drag = true; lx = e.clientX; ly = e.clientY;
+    cv.style.cursor = 'grabbing';
+    if (cv.setPointerCapture) { try { cv.setPointerCapture(e.pointerId); } catch (e2) { } }
+  });
+  addEventListener('pointerup', function () { drag = false; cv.style.cursor = 'grab'; });
+  addEventListener('pointercancel', function () { drag = false; cv.style.cursor = 'grab'; });
+  addEventListener('pointermove', function (e) {
+    if (!drag) return;
+    camY -= (e.clientX - lx) * 0.006;
+    camP += (e.clientY - ly) * 0.005;
+    if (camP > 1.45) camP = 1.45;
+    if (camP < -1.45) camP = -1.45;
+    lx = e.clientX; ly = e.clientY;
+    mkBasis();
+  });
+  addEventListener('wheel', function (e) {
+    camD *= (1 + (e.deltaY > 0 ? 1 : -1) * 0.09);
+    if (camD < 2.6) camD = 2.6;
+    if (camD > 16) camD = 16;
+    mkBasis();
+  }, { passive: true });
+  cv.addEventListener('dblclick', function () {
+    camD = DEF.d; camY = DEF.y; camP = DEF.p;
+    mkBasis();
+    flash('视角复位');
+  });
+
+  addEventListener('keydown', function (e) {
+    if (e.target && e.target.tagName === 'INPUT') return;
+    var k = e.key.toUpperCase();
+    if (k === 'C' || k === 'Q' || k === 'E' || k === 'W' || k === 'S') { startRec(k); return; }
+    if (k === 'X') { cal.invertYaw = !cal.invertYaw; saveCal(); flash('左右 ' + (cal.invertYaw ? '反相' : '正相')); return; }
+    if (k === 'Y') { cal.invertPitch = !cal.invertPitch; saveCal(); flash('上下 ' + (cal.invertPitch ? '反相' : '正相')); return; }
+    if (k === 'Z') {
+      if (e.shiftKey) { cal.invertRoll = !cal.invertRoll; saveCal(); paintRoll(); flash('倾斜方向 ' + (cal.invertRoll ? '反相' : '正相')); }
+      else { cal.rollOn = !cal.rollOn; saveCal(); paintRoll(); flash('倾斜 ' + (cal.rollOn ? '开' : '关')); }
+      return;
+    }
+    if (k === '1' || k === '2' || k === '3') {
+      cal.yawAxis = (+k) - 1;
+      cal.pitchAxis = [0, 1, 2].filter(function (x) { return x !== cal.yawAxis; })[0];
+      cal.rollAxis = 3 - cal.yawAxis - cal.pitchAxis;
+      saveCal(); paintCal();
+    }
+  });
+
+  var flashT = 0;
+  function flash(t) {
+    var m = $('vM');
+    m.textContent = t;
+    clearTimeout(flashT);
+    flashT = setTimeout(function () { setM('实时 HID'); }, 900);
+  }
+
+  /* ============================================================
+     静音保活开关
+     ============================================================ */
+  var kaS = { alive: false, state: { on: false, inj: false, ep: '', why: '', err: '', others: 0 } };
+
+  function kaText() {
+    var o = kaS.state || {};
+    if (!kaS.alive) return '保活进程未启动';
+    if (!o.on) return '已关闭';
+    if (o.err) return '错误 ' + o.err;
+    if (o.inj) return '注入中 · ' + (o.ep || '');
+    if (o.others > 0) return '让位 · 有 ' + o.others + ' 路音频';
+    return (o.why || '待机');
+  }
+
+  function paintKa() {
+    var b = $('ka');
+    var on = !!(kaS.state && kaS.state.on);
+    b.textContent = '保活 ' + (on ? '开' : '关');
+    b.style.borderColor = on ? '#2f6f52' : '#24384a';
+    b.style.color = on ? '#4ee1a0' : '#9fb6c9';
+    $('kaS').textContent = kaText();
+  }
+
+  function paintRoll() {
+    var b = $('rz'), i = $('irz');
+    b.textContent = '倾斜 ' + (cal.rollOn ? '开' : '关');
+    b.style.borderColor = cal.rollOn ? '#2f6f52' : '#24384a';
+    b.style.color = cal.rollOn ? '#4ee1a0' : '#9fb6c9';
+    i.textContent = '倾斜' + (cal.invertRoll ? '反' : '正');
+    i.style.color = cal.invertRoll ? '#ffb454' : '#9fb6c9';
+  }
+
+  function pollKa() {
+    fetch('/ka', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (o) { kaS = o; paintKa(); })
+      .catch(function () { kaS = { alive: false, state: {} }; paintKa(); });
+  }
+
+  $('ka').addEventListener('click', function () {
+    var want = !(kaS.state && kaS.state.on);
+    fetch('/ka/' + (want ? 'on' : 'off'), { method: 'POST' })
+      .then(function (r) { return r.json(); })
+      .then(function (o) { kaS = o; paintKa(); })
+      .catch(pollKa);
+  });
+
+  $('rz').addEventListener('click', function () {
+    cal.rollOn = !cal.rollOn; saveCal(); paintRoll();
+    flash('倾斜 ' + (cal.rollOn ? '开' : '关'));
+  });
+  $('irz').addEventListener('click', function () {
+    cal.invertRoll = !cal.invertRoll; saveCal(); paintRoll();
+    flash('倾斜方向 ' + (cal.invertRoll ? '反相' : '正相'));
+  });
+
+  $('sm').addEventListener('input', function () { smoothPct = +this.value; applyFilters(); saveCal(); });
+  $('fw').addEventListener('input', function () { followPct = +this.value; applyFilters(); saveCal(); });
+  $('gn').addEventListener('input', function () { gainPct = +this.value; saveCal(); });
+  ['Q', 'E', 'W', 'S'].forEach(function (k) {
+    $('t-' + k).addEventListener('change', function () { cal.target[k] = +this.value; rebuild(); });
+  });
+  $('clr').addEventListener('click', function () {
+    cal.points = { C: null, Q: null, E: null, W: null, S: null };
+    cal.center = null; cal.slopeYaw = null; cal.slopePitch = null;
+    cal.yawAxis = 2; cal.pitchAxis = 0; cal.rollAxis = 1;
+    cal.invertYaw = true; cal.invertPitch = false;
+    warm = [];
+    try { localStorage.removeItem(KEY); } catch (e) { }
+    paintCal();
+    flash('已清除');
+  });
+
+  addEventListener('resize', resize);
+  resize();
+  loadCal();
+  applyFilters();
+  ['Q', 'E', 'W', 'S'].forEach(function (k) { $('t-' + k).value = cal.target[k]; });
+  paintCal();
+  paintRoll();
+  connect();
+  pollKa();
+  setInterval(pollKa, 2000);
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
